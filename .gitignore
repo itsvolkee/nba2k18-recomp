@@ -1,0 +1,11 @@
+# Game files and anything derived from them stay on your PC, never in this repo.
+private/
+ppc/
+*.xex
+*.xexp
+*.iso
+
+# Locally downloaded tools and machine-specific output
+tools/
+notes/
+recompile.bat

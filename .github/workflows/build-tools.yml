@@ -1,0 +1,89 @@
+# Builds XenonAnalyse and XenonRecomp for Windows x64 on GitHub's runners,
+# so nothing needs to be installed locally. No game files are involved here:
+# the tools are run on your own PC against your own disc.
+
+name: Build Xenon tools
+
+on:
+  workflow_dispatch:
+    inputs:
+      xenonrecomp_ref:
+        description: "XenonRecomp branch, tag or commit to build"
+        default: "main"
+        required: true
+  push:
+    paths:
+      - ".github/workflows/build-tools.yml"
+
+permissions:
+  contents: write   # needed to publish the release with the zip
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out XenonRecomp
+        uses: actions/checkout@v4
+        with:
+          repository: hedge-dev/XenonRecomp
+          ref: ${{ github.event.inputs.xenonrecomp_ref || 'main' }}
+          submodules: recursive
+          path: XenonRecomp
+
+      - name: Set up MSVC environment (for clang-cl's linker and headers)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        run: choco install ninja -y --no-progress
+
+      - name: Configure
+        working-directory: XenonRecomp
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang-cl
+          -DCMAKE_CXX_COMPILER=clang-cl
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+
+      - name: Build
+        working-directory: XenonRecomp
+        run: cmake --build build
+
+      - name: Build xdvdfs (ISO extractor)
+        run: cargo install xdvdfs-cli --root xdvdfs-bin --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "xenon-tools"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item xdvdfs-bin/bin/xdvdfs.exe $out
+          foreach ($name in "XenonAnalyse.exe","XenonRecomp.exe") {
+            $f = Get-ChildItem XenonRecomp/build -Recurse -Filter $name | Select-Object -First 1
+            if (-not $f) { throw "$name was not produced by the build" }
+            Copy-Item $f.FullName $out
+          }
+          $ctx = Get-ChildItem XenonRecomp -Recurse -Filter "ppc_context.h" | Select-Object -First 1
+          if (-not $ctx) { throw "ppc_context.h not found" }
+          Copy-Item $ctx.FullName $out
+          Copy-Item XenonRecomp/LICENSE* $out -ErrorAction SilentlyContinue
+          $commit = git -C XenonRecomp rev-parse HEAD
+          "XenonRecomp commit: $commit`nBuilt: $(Get-Date -Format s)Z" | Set-Content "$out/BUILD-INFO.txt"
+          Compress-Archive -Path "$out/*" -DestinationPath xenon-tools-win64.zip -Force
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xenon-tools-win64
+          path: xenon-tools-win64.zip
+
+      - name: Publish as release "tools-latest"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tools-latest
+          name: Xenon tools (latest build)
+          body: xdvdfs, XenonAnalyse, XenonRecomp and ppc_context.h built for Windows x64. See BUILD-INFO.txt inside the zip for the exact XenonRecomp commit.
+          files: xenon-tools-win64.zip
+          make_latest: true
