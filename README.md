@@ -51,8 +51,12 @@ Build Xenon tools → Run workflow → enter a branch, tag or commit.
 - [x] Extraction and first analysis pass
 - [x] Register save/restore helper addresses in `config/NBA2K18.toml`
 - [x] First XenonRecomp run: 103,788 functions
-- [x] Missing PowerPC instructions added (`patches/`): unrecognized instructions down from ~6,600 to 74
-- [ ] Remaining 74 unrecognized instructions (some look like data inside `.text`)
-- [ ] Jump tables (stock XenonAnalyse finds none) and function boundaries
+- [x] Missing PowerPC instructions added (`patches/`): unrecognized instructions down from ~6,600 to 8
+      (the 8 left are `mullhw`, which the Xbox 360 CPU doesn't have: data words inside `.text`)
+- [x] Jump tables: `analysis/jt_detect.py` finds 1,057 tables / 40,383 cases (stock XenonAnalyse finds 0)
+- [x] Switch-aware function analysis (`patches/`): "switch case outside function" errors 21,424 → 0;
+      81,981 functions
+- [ ] Full syntax check of the generated C++ (spot checks pass)
 - [ ] setjmp/longjmp addresses, if the game uses them
+- [ ] Review the 668 jump tables that have no bounds check (sized from the table data)
 - [ ] Runtime: kernel/XAM, file system, input, audio, Xenos GPU → D3D12/Vulkan

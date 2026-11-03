@@ -95,9 +95,12 @@ Get-ChildItem -LiteralPath $GameDir -Recurse -File |
     Sort-Object Path | Export-Csv (Join-Path $Root "notes\file-list.csv") -NoTypeInformation
 
 # ---------- 4. Jump-table analysis ----------
-Step "Running XenonAnalyse"
+# The real jump tables come from analysis\jt_detect.py and are committed in
+# config\NBA2K18_switch_tables.toml. Stock XenonAnalyse finds none for this game;
+# its output goes to notes\ for reference only so it never overwrites them.
+Step "Running XenonAnalyse (reference only)"
 $switchToml = Join-Path $Root "config\NBA2K18_switch_tables.toml"
-& $analyse "$($xex.FullName)" "$switchToml" 2>&1 | Tee-Object -FilePath (Join-Path $Root "notes\xenonanalyse.log")
+& $analyse "$($xex.FullName)" (Join-Path $Root "notes\xenonanalyse_switch_tables.toml") 2>&1 | Tee-Object -FilePath (Join-Path $Root "notes\xenonanalyse.log")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "XenonAnalyse exited with $LASTEXITCODE (see notes\xenonanalyse.log). Partial output is normal for games other than Sonic Unleashed." -ForegroundColor Yellow
 }
