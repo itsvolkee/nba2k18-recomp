@@ -21,7 +21,8 @@
 param(
     [string]$Iso      = "E:\Gamefiles\NBA 2K18 (USA)\NBA 2K18 (USA).iso",
     [string]$Repo     = "",   # owner/name of this repo on GitHub
-    [string]$ToolsZip = ""    # path to an already-downloaded xenon-tools-win64.zip
+    [string]$ToolsZip = "",   # path to an already-downloaded xenon-tools-win64.zip
+    [switch]$UpdateTools      # re-download the tools even if they're already present
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,6 +49,9 @@ $analyse = Join-Path $ToolsDir "XenonAnalyse.exe"
 $recomp  = Join-Path $ToolsDir "XenonRecomp.exe"
 $ppcCtx  = Join-Path $ToolsDir "ppc_context.h"
 
+if ($UpdateTools) {
+    Remove-Item -Force -ErrorAction SilentlyContinue $analyse, $recomp, $xdvdfs, $ppcCtx, (Join-Path $ToolsDir "xenon-tools-win64.zip")
+}
 if (-not (Test-Path $analyse)) {
     if (-not $ToolsZip) {
         if (-not $Repo) { throw "Pass -Repo owner/name (public repo) or -ToolsZip <path to xenon-tools-win64.zip>." }

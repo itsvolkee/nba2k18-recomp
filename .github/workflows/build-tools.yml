@@ -8,12 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       xenonrecomp_ref:
-        description: "XenonRecomp branch, tag or commit to build"
-        default: "main"
+        description: "XenonRecomp branch, tag or commit to build (patches in patches/ must apply to it)"
+        default: "ddd128bcca99fe8bfbb99bea583c972351fa6ace"
         required: true
   push:
     paths:
       - ".github/workflows/build-tools.yml"
+      - "patches/**"
 
 permissions:
   contents: write   # needed to publish the release with the zip
@@ -26,9 +27,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hedge-dev/XenonRecomp
-          ref: ${{ github.event.inputs.xenonrecomp_ref || 'main' }}
+          ref: ${{ github.event.inputs.xenonrecomp_ref || 'ddd128bcca99fe8bfbb99bea583c972351fa6ace' }}
           submodules: recursive
           path: XenonRecomp
+
+      - name: Check out this repo (for patches)
+        uses: actions/checkout@v4
+        with:
+          path: project
+
+      - name: Apply NBA 2K18 patches to XenonRecomp
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for p in project/patches/*.patch; do
+            echo "Applying $p"
+            git -C XenonRecomp apply --whitespace=nowarn "$GITHUB_WORKSPACE/$p"
+          done
 
       - name: Set up MSVC environment (for clang-cl's linker and headers)
         uses: ilammy/msvc-dev-cmd@v1

@@ -1,0 +1,38 @@
+# XenonRecomp config for NBA 2K18 (Xbox 360, USA, base disc, no title update)
+# Only valid for default.xex with SHA-256
+#   27B6EF7D06B644288DBD74E3F643665D99346577A612815C5ADE9B317CA8BA5A
+# Paths are relative to this file.
+
+[main]
+file_path = "../private/game/default.xex"
+out_directory_path = "../ppc"
+switch_table_file_path = "NBA2K18_switch_tables.toml"
+
+# Leave all optimizations off until the recompilation actually runs.
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+
+# Register save/restore helpers. Each pattern matched exactly once, and the
+# routines sit back to back in the runtime library (0x82CF4170-0x82CF4800).
+restgprlr_14_address = 0x82CF41C0
+savegprlr_14_address = 0x82CF4170
+restfpr_14_address   = 0x82CF43FC
+savefpr_14_address   = 0x82CF43B0
+restvmx_14_address   = 0x82CF46E8
+savevmx_14_address   = 0x82CF4450
+restvmx_64_address   = 0x82CF477C
+savevmx_64_address   = 0x82CF44E4
+
+# Not located yet (only needed if the game uses them):
+# longjmp_address = 0x00000000
+# setjmp_address  = 0x00000000
+
+# Manual function boundaries for anything the analyzer misses:
+# functions = [ { address = 0x00000000, size = 0x0 } ]
+# invalid_instructions = [ { data = 0x00000000, size = 4 } ]

@@ -49,7 +49,10 @@ Build Xenon tools → Run workflow → enter a branch, tag or commit.
 
 - [x] Tool build in CI
 - [x] Extraction and first analysis pass
-- [ ] Register save/restore helper addresses in `config/NBA2K18.toml`
-- [ ] Jump tables and function boundaries the analyzer misses
-- [ ] First clean XenonRecomp run
+- [x] Register save/restore helper addresses in `config/NBA2K18.toml`
+- [x] First XenonRecomp run: 103,788 functions
+- [x] Missing PowerPC instructions added (`patches/`): unrecognized instructions down from ~6,600 to 74
+- [ ] Remaining 74 unrecognized instructions (some look like data inside `.text`)
+- [ ] Jump tables (stock XenonAnalyse finds none) and function boundaries
+- [ ] setjmp/longjmp addresses, if the game uses them
 - [ ] Runtime: kernel/XAM, file system, input, audio, Xenos GPU → D3D12/Vulkan
