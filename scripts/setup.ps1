@@ -34,6 +34,7 @@ $GameDir  = Join-Path $Root "private\game"
 foreach ($d in $ToolsDir, $GameDir, (Join-Path $Root "notes"), (Join-Path $Root "config"), (Join-Path $Root "ppc")) {
     New-Item -ItemType Directory -Force -Path $d | Out-Null
 }
+Start-Transcript -Path (Join-Path $Root "notes\setup.log") -Append | Out-Null
 
 # ---------- 0. Preflight ----------
 Step "Checking inputs"
