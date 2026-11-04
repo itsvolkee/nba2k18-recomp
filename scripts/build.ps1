@@ -59,11 +59,16 @@ $base = "https://github.com/$Repo/releases/download/toolchain"
 $needed = $toolchain.Keys | Where-Object { -not (Test-Path $toolchain[$_]) }
 if ($needed) {
     Step "Downloading the portable toolchain (about 250 MB, once)"
+    # Save the hash list to a file: GitHub serves it as binary, and Windows
+    # PowerShell 5.1 then hands back bytes instead of text from .Content.
+    $sumsFile = Join-Path $Tools "SHA256SUMS"
+    Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile $sumsFile -UseBasicParsing
     $sums = @{}
-    (Invoke-WebRequest -Uri "$base/SHA256SUMS" -UseBasicParsing).Content -split "`n" | ForEach-Object {
+    Get-Content -LiteralPath $sumsFile | ForEach-Object {
         $parts = $_.Trim() -split "\s+"
-        if ($parts.Count -eq 2) { $sums[$parts[1]] = $parts[0].ToUpper() }
+        if ($parts.Count -eq 2) { $sums[$parts[1].TrimStart('*')] = $parts[0].ToUpper() }
     }
+    if ($sums.Count -eq 0) { throw "Could not read any hashes from $base/SHA256SUMS." }
     foreach ($name in $needed) {
         $zip = Join-Path $Tools $name
         Write-Host "  $name"
