@@ -15,6 +15,7 @@ on:
     paths:
       - ".github/workflows/build-tools.yml"
       - "patches/**"
+      - "analysis/xexdump.cpp"
 
 permissions:
   contents: write   # needed to publish the release with the zip
@@ -53,6 +54,15 @@ jobs:
       - name: Install Ninja
         run: choco install ninja -y --no-progress
 
+      - name: Add XexDump (writes the decrypted image the runtime loads)
+        shell: bash
+        run: |
+          cat >> XenonRecomp/CMakeLists.txt <<'EOF'
+
+          add_executable(XexDump "${CMAKE_CURRENT_SOURCE_DIR}/../project/analysis/xexdump.cpp")
+          target_link_libraries(XexDump PRIVATE XenonUtils)
+          EOF
+
       - name: Configure
         working-directory: XenonRecomp
         run: >
@@ -75,7 +85,7 @@ jobs:
           $out = "xenon-tools"
           New-Item -ItemType Directory -Force $out | Out-Null
           Copy-Item xdvdfs-bin/bin/xdvdfs.exe $out
-          foreach ($name in "XenonAnalyse.exe","XenonRecomp.exe") {
+          foreach ($name in "XenonAnalyse.exe","XenonRecomp.exe","XexDump.exe") {
             $f = Get-ChildItem XenonRecomp/build -Recurse -Filter $name | Select-Object -First 1
             if (-not $f) { throw "$name was not produced by the build" }
             Copy-Item $f.FullName $out
@@ -84,6 +94,8 @@ jobs:
           if (-not $ctx) { throw "ppc_context.h not found" }
           Copy-Item $ctx.FullName $out
           Copy-Item XenonRecomp/LICENSE* $out -ErrorAction SilentlyContinue
+          # simde headers (MIT): needed to compile the recompiled code on the PC
+          Copy-Item -Recurse XenonRecomp/thirdparty/simde "$out/simde"
           $commit = git -C XenonRecomp rev-parse HEAD
           "XenonRecomp commit: $commit`nBuilt: $(Get-Date -Format s)Z" | Set-Content "$out/BUILD-INFO.txt"
           Compress-Archive -Path "$out/*" -DestinationPath xenon-tools-win64.zip -Force
@@ -99,6 +111,49 @@ jobs:
         with:
           tag_name: tools-latest
           name: Xenon tools (latest build)
-          body: xdvdfs, XenonAnalyse, XenonRecomp and ppc_context.h built for Windows x64. See BUILD-INFO.txt inside the zip for the exact XenonRecomp commit.
+          body: xdvdfs, XenonAnalyse, XenonRecomp, XexDump, ppc_context.h and simde headers built for Windows x64. See BUILD-INFO.txt inside the zip for the exact XenonRecomp commit.
           files: xenon-tools-win64.zip
           make_latest: true
+
+  # Portable compiler toolchain for building the game on the PC without
+  # Visual Studio: llvm-mingw (clang + Windows headers/libs), CMake, Ninja.
+  # Mirrored into this repo's "toolchain" release with SHA-256 hashes so the
+  # setup script downloads from one place and can verify what it gets.
+  toolchain:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Fetch latest official releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dl && cd dl
+          pick() {  # repo, asset-name regex, output name
+            url=$(gh api "repos/$1/releases/latest" --jq ".assets[] | select(.name | test(\"$2\")) | .browser_download_url" | head -1)
+            tag=$(gh api "repos/$1/releases/latest" --jq .tag_name)
+            [ -n "$url" ] || { echo "no asset matching $2 in $1"; exit 1; }
+            echo "$1 $tag $url"
+            curl -fsSL -o "$3" "$url"
+            echo "$3 $1 $tag $(basename "$url")" >> ../SOURCES.txt
+          }
+          pick mstorsjo/llvm-mingw '^llvm-mingw-[0-9]+-ucrt-x86_64\.zip$' llvm-mingw.zip
+          pick Kitware/CMake       '^cmake-[0-9.]+-windows-x86_64\.zip$'   cmake.zip
+          pick ninja-build/ninja   '^ninja-win\.zip$'                      ninja.zip
+          sha256sum *.zip > SHA256SUMS
+          cat SHA256SUMS ../SOURCES.txt
+          cp ../SOURCES.txt .
+
+      - name: Publish as release "toolchain"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: toolchain
+          name: Portable build toolchain
+          body: Unmodified copies of the latest llvm-mingw (ucrt, x86_64), CMake and Ninja Windows releases. SHA256SUMS lists their hashes; SOURCES.txt says where each came from.
+          files: |
+            dl/llvm-mingw.zip
+            dl/cmake.zip
+            dl/ninja.zip
+            dl/SHA256SUMS
+            dl/SOURCES.txt
+          make_latest: false
