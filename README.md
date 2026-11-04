@@ -1,7 +1,7 @@
 # NBA 2K18 (Xbox 360) static recompilation
 
-Work-in-progress setup for recompiling the Xbox 360 version of NBA 2K18 to
-Windows with [XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
+Work-in-progress setup for recompiling the Xbox 360 version of NBA 2K18 to a
+native Windows program with [XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
 
 **This repository contains no game code or assets.** You need your own copy of
 the game. Everything taken from the disc, and all C++ generated from it, lives
@@ -10,53 +10,66 @@ in `private/` and `ppc/`, which are git-ignored and never leave your PC.
 ## How it works
 
 1. **GitHub Actions builds the tools.** The `Build Xenon tools` workflow
-   compiles xdvdfs, XenonAnalyse and XenonRecomp for Windows x64 and publishes
-   them as the `tools-latest` release (`xenon-tools-win64.zip`). Nothing needs
-   to be installed locally.
-2. **You run them locally.** `scripts/setup.ps1` downloads that zip, extracts
-   the ISO, fingerprints `default.xex`, runs the jump-table analysis and writes
-   a starter config.
+   compiles xdvdfs, XenonAnalyse, XenonRecomp (with this project's patches)
+   and XexDump for Windows x64, bundles the simde headers, and publishes them
+   as the `tools-latest` release. A second job mirrors the latest llvm-mingw,
+   CMake and Ninja releases into a `toolchain` release with SHA-256 hashes.
+2. **Setup runs on your PC.** `scripts/setup.ps1` downloads the tools,
+   extracts the ISO into `private/game` and fingerprints `default.xex`.
+3. **The build runs on your PC.** `scripts/build.ps1` downloads the portable
+   toolchain (checking every hash), writes the decrypted image with XexDump,
+   generates the game's C++ into `ppc/` with XenonRecomp, and compiles it
+   together with `runtime/` into `NBA2K18.exe`. No Visual Studio needed.
 
 ## Usage
 
+Double-click, in order: `run-setup.cmd`, `build.cmd`, `run.cmd`.
+
+Or from PowerShell in the repo folder:
+
 ```powershell
-# from the repo folder, in a normal PowerShell window
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Repo <owner>/<repo>
-
-# private repo: download xenon-tools-win64.zip from Releases, then
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ToolsZip C:\path\to\xenon-tools-win64.zip
-
-# different ISO location
-... -Iso "D:\path\to\NBA 2K18 (USA).iso"
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Repo itsvolkee/nba2k18-recomp
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1
+.\NBA2K18.exe private\game
 ```
 
-To rebuild the tools against a different XenonRecomp commit: Actions →
-Build Xenon tools → Run workflow → enter a branch, tag or commit.
+`setup.ps1 -UpdateTools` re-downloads the latest tool build; `build.ps1 -Regenerate`
+forces the C++ to be regenerated. Logs go to `notes\` and `nba2k18.log`.
 
 ## Layout
 
 | Path | In git | Contents |
 |---|---|---|
-| `.github/workflows/` | yes | Tool build |
-| `scripts/` | yes | Local setup |
-| `config/` | yes | Recompiler config and jump tables (addresses only) |
-| `tools/` | no | Downloaded prebuilt tools |
-| `private/game/` | no | Extracted disc contents |
+| `.github/workflows/` | yes | Tool and toolchain builds |
+| `patches/` | yes | XenonRecomp changes: extra instructions, switch-aware analysis |
+| `analysis/` | yes | Jump-table detector, pointer-reached function scanner, XexDump |
+| `config/` | yes | Recompiler config, function list and jump tables (addresses only) |
+| `runtime/` | yes | Host program: memory, loader, threads, kernel/XAM calls, files |
+| `scripts/` | yes | Setup and build scripts |
+| `tools/` | no | Downloaded tools and toolchain |
+| `private/game/` | no | Extracted disc contents and decrypted image |
 | `ppc/` | no | Generated C++ |
-| `notes/` | no | Build fingerprint, file list, analysis log |
+| `build/`, `notes/` | no | Build output and logs |
 
 ## Status
 
-- [x] Tool build in CI
-- [x] Extraction and first analysis pass
-- [x] Register save/restore helper addresses in `config/NBA2K18.toml`
-- [x] First XenonRecomp run: 103,788 functions
-- [x] Missing PowerPC instructions added (`patches/`): unrecognized instructions down from ~6,600 to 8
-      (the 8 left are `mullhw`, which the Xbox 360 CPU doesn't have: data words inside `.text`)
+Recompiler:
+- [x] Register save/restore helper addresses
+- [x] 60 PowerPC opcodes added (`patches/`); 8 unrecognized remain, all `mullhw`,
+      which the Xbox 360 CPU doesn't have (data words inside `.text`)
 - [x] Jump tables: `analysis/jt_detect.py` finds 1,057 tables / 40,383 cases (stock XenonAnalyse finds 0)
-- [x] Switch-aware function analysis (`patches/`): "switch case outside function" errors 21,424 → 0;
-      81,981 functions
-- [x] All 319 generated C++ files pass a syntax check (clang, C++20)
+- [x] Switch-aware function analysis: "switch case outside function" errors 21,424 → 0
+- [x] Pointer-reached functions: `analysis/fn_ptrs.cpp` adds 2,640 functions only reached
+      through data pointers or addresses built in code; 84,621 functions in total
 - [ ] setjmp/longjmp addresses, if the game uses them
 - [ ] Review the 668 jump tables that have no bounds check (sized from the table data)
-- [ ] Runtime: kernel/XAM, file system, input, audio, Xenos GPU → D3D12/Vulkan
+
+Runtime (`runtime/`):
+- [x] Guest memory, XEX loader, function table, guest threads with PCR/TLS
+- [x] 111 of 318 imports: memory, sync objects, waits, threads, TLS, time, strings,
+      printf family, file system; the rest log a warning when called
+- [x] Runs the game's startup code on Linux (test build)
+- [ ] Get through startup: the first run hit a function the recompiler had missed
+      (now added); next runs will show which imports are needed next
+- [ ] Windows build (`scripts/build.ps1`) — written, not yet tried on a PC
+- [ ] Graphics (Xenos → D3D12/Vulkan), audio, input, XAM/profiles, networking
