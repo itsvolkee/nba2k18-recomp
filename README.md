@@ -56,7 +56,7 @@ Build Xenon tools → Run workflow → enter a branch, tag or commit.
 - [x] Jump tables: `analysis/jt_detect.py` finds 1,057 tables / 40,383 cases (stock XenonAnalyse finds 0)
 - [x] Switch-aware function analysis (`patches/`): "switch case outside function" errors 21,424 → 0;
       81,981 functions
-- [ ] Full syntax check of the generated C++ (spot checks pass)
+- [x] All 319 generated C++ files pass a syntax check (clang, C++20)
 - [ ] setjmp/longjmp addresses, if the game uses them
 - [ ] Review the 668 jump tables that have no bounds check (sized from the table data)
 - [ ] Runtime: kernel/XAM, file system, input, audio, Xenos GPU → D3D12/Vulkan
