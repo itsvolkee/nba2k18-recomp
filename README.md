@@ -68,8 +68,9 @@ Runtime (`runtime/`):
 - [x] Guest memory, XEX loader, function table, guest threads with PCR/TLS
 - [x] 111 of 318 imports: memory, sync objects, waits, threads, TLS, time, strings,
       printf family, file system; the rest log a warning when called
-- [x] Runs the game's startup code on Linux (test build)
-- [ ] Get through startup: the first run hit a function the recompiler had missed
-      (now added); next runs will show which imports are needed next
-- [ ] Windows build (`scripts/build.ps1`) — written, not yet tried on a PC
+- [x] Windows build (`scripts/build.ps1`): NBA2K18.exe builds on the PC with llvm-mingw
+- [x] Gets through startup on Windows: 10 threads, opens all data archives (0A-0H),
+      queries controllers and video mode, starts GPU initialisation
+- [ ] Stalls after GPU init: the game waits for the GPU (ring-buffer read pointer,
+      vsync interrupt) and nothing emulates it yet
 - [ ] Graphics (Xenos → D3D12/Vulkan), audio, input, XAM/profiles, networking
