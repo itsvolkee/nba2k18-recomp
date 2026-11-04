@@ -113,10 +113,22 @@ if ($stale) {
     Step "Generating the game's C++ (about a minute)"
     if (Test-Path $PpcDir) { Remove-Item -Recurse -Force $PpcDir }
     New-Item -ItemType Directory -Force -Path $PpcDir | Out-Null
-    & (Join-Path $Tools "XenonRecomp.exe") "$config" (Join-Path $Tools "ppc_context.h") *> (Join-Path $Root "notes\recompile.log")
-    if ($LASTEXITCODE -ne 0) { throw "XenonRecomp failed; see notes\recompile.log" }
-    $unrec = (Select-String -Path (Join-Path $Root "notes\recompile.log") -Pattern "Unrecognized instruction").Count
-    Write-Host "  $((Get-ChildItem $PpcDir -Filter 'ppc_recomp.*.cpp').Count) files, $unrec unrecognized instructions"
+    # Run it as a separate process with real output files: PowerShell 5.1's `*>`
+    # redirection of a native program captured nothing and the output was cut short.
+    $log = Join-Path $Root "notes\recompile.log"
+    $err = Join-Path $Root "notes\recompile.err.log"
+    $p = Start-Process -FilePath (Join-Path $Tools "XenonRecomp.exe") `
+        -ArgumentList "`"$config`"", "`"$(Join-Path $Tools 'ppc_context.h')`"" `
+        -WorkingDirectory $Root -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput $log -RedirectStandardError $err
+    $out = (Get-Content -LiteralPath $log -Raw) + (Get-Content -LiteralPath $err -Raw)
+    if ($p.ExitCode -ne 0) { throw "XenonRecomp exited with code $($p.ExitCode); see notes\recompile.log and notes\recompile.err.log" }
+    if ($out -notmatch "100%") { throw "XenonRecomp stopped before finishing (no 100% in its output); see notes\recompile.log" }
+    $files = (Get-ChildItem $PpcDir -Filter 'ppc_recomp.*.cpp').Count
+    $unrec = ([regex]::Matches($out, "Unrecognized instruction")).Count
+    $switchErr = ([regex]::Matches($out, "jump outside function")).Count
+    Write-Host "  $files files, $unrec unrecognized instructions, $switchErr switch errors"
+    if ($files -lt 200) { throw "Only $files generated files; expected about 330. See notes\recompile.log" }
 }
 
 # ---------- 4. Compile ----------
