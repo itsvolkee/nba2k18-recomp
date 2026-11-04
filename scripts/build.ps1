@@ -36,8 +36,14 @@ Start-Transcript -Path (Join-Path $Root "notes\build.log") -Append | Out-Null
 # ---------- 0. Preflight ----------
 Step "Checking inputs"
 $xex = Join-Path $GameDir "default.xex"
-foreach ($f in $xex, (Join-Path $Tools "XenonRecomp.exe"), (Join-Path $Tools "ppc_context.h")) {
+foreach ($f in $xex, (Join-Path $Tools "ppc_context.h")) {
     if (-not (Test-Path $f)) { throw "Missing $f. Run scripts\setup.ps1 first." }
+}
+if (-not (Test-Path (Join-Path $Tools "XenonRecomp.exe"))) {
+    throw ("tools\XenonRecomp.exe is missing, but the other tools from the same download are there. " +
+           "Antivirus software may have quarantined it: check Windows Security > Virus & threat protection > " +
+           "Protection history, restore it if it's listed, then run build.cmd again. " +
+           "Or run: scripts\setup.ps1 -UpdateTools to download it again.")
 }
 if (-not (Test-Path (Join-Path $Tools "XexDump.exe")) -or -not (Test-Path (Join-Path $Tools "simde\x86\sse.h"))) {
     Step "Tools are older than this script (no XexDump/simde): updating them"
@@ -105,7 +111,8 @@ if (-not (Test-Path $img)) {
 # ---------- 3. Generate C++ ----------
 $config = Join-Path $Root "config\NBA2K18.toml"
 $stamp  = Join-Path $PpcDir "ppc_recomp_shared.h"
-$stale  = $Regenerate -or -not (Test-Path $stamp) -or
+$done   = Join-Path $PpcDir ".complete"       # written only after a verified, complete generation
+$stale  = $Regenerate -or -not (Test-Path $stamp) -or -not (Test-Path $done) -or
           ((Get-Item $config).LastWriteTime -gt (Get-Item $stamp).LastWriteTime) -or
           ((Get-Item (Join-Path $Root "config\NBA2K18_switch_tables.toml")).LastWriteTime -gt (Get-Item $stamp).LastWriteTime) -or
           ((Get-Item (Join-Path $Tools "XenonRecomp.exe")).LastWriteTime -gt (Get-Item $stamp).LastWriteTime)
@@ -129,6 +136,7 @@ if ($stale) {
     $switchErr = ([regex]::Matches($out, "jump outside function")).Count
     Write-Host "  $files files, $unrec unrecognized instructions, $switchErr switch errors"
     if ($files -lt 200) { throw "Only $files generated files; expected about 330. See notes\recompile.log" }
+    "$files files, $unrec unrecognized, $switchErr switch errors, $(Get-Date -Format s)" | Set-Content -LiteralPath $done
 }
 
 # ---------- 4. Compile ----------
