@@ -74,7 +74,11 @@ Runtime (`runtime/`):
 - [x] Graphics stand-in (`runtime/gpu_stub.cpp`): 60 Hz vsync interrupts, ring buffer
       read-pointer writeback, video-mode queries, DPCs. The game stays alive and
       receives vsyncs
-- [ ] Stalls after its first 31 dwords of GPU commands, 0 frames: it most likely
-      waits for a fence or command-processor interrupt in those commands. Next: a
-      minimal PM4 command processor (memory/event writes, interrupts, indirect buffers)
+- [x] Minimal PM4 command processor (`runtime/gpu_cp.cpp`): register writes, memory and
+      event writes, interrupts, indirect buffers, waits; drawing skipped
+- [x] Integer division guarded in the recompiler (x86 traps on /0, PowerPC doesn't)
+- [x] Finishes its first frame, starts audio and its input loop, runs without crashing
+- [ ] Stuck after frame 1: two WAIT_REG_MEM commands wait for memory values that
+      nothing writes (likely the "frame presented" marker VdSwap's commands set on
+      real hardware). Next: make VdSwap emit its command-buffer packets
 - [ ] Graphics (Xenos → D3D12/Vulkan), audio, input, XAM/profiles, networking
