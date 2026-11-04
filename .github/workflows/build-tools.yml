@@ -137,9 +137,9 @@ jobs:
             curl -fsSL -o "$3" "$url"
             echo "$3 $1 $tag $(basename "$url")" >> ../SOURCES.txt
           }
-          pick mstorsjo/llvm-mingw '^llvm-mingw-[0-9]+-ucrt-x86_64\.zip$' llvm-mingw.zip
-          pick Kitware/CMake       '^cmake-[0-9.]+-windows-x86_64\.zip$'   cmake.zip
-          pick ninja-build/ninja   '^ninja-win\.zip$'                      ninja.zip
+          pick mstorsjo/llvm-mingw '^llvm-mingw-[0-9]+-ucrt-x86_64[.]zip$' llvm-mingw.zip
+          pick Kitware/CMake       '^cmake-[0-9.]+-windows-x86_64[.]zip$'   cmake.zip
+          pick ninja-build/ninja   '^ninja-win[.]zip$'                      ninja.zip
           sha256sum *.zip > SHA256SUMS
           cat SHA256SUMS ../SOURCES.txt
           cp ../SOURCES.txt .

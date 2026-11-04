@@ -19,6 +19,14 @@ static std::vector<uint8_t> ReadAll(const fs::path& p)
 
 static uint32_t BE32(const uint8_t* p) { return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; }
 
+// Indirect calls (bctrl) go through CTR, so the target is still in ctx.ctr here.
+static void UnmappedCall(PPCContext& ctx, uint8_t*)
+{
+    LOG_ERROR("indirect call to 0x{:08X}, which isn't a known function start (called from around 0x{:08X})",
+              ctx.ctr.u32, uint32_t(ctx.lr));
+    std::abort();
+}
+
 static fs::path FindGameFolder(int argc, char** argv)
 {
     if (argc > 1) return argv[1];
@@ -92,6 +100,10 @@ int main(int argc, char** argv)
     mem::W32(exe.guestModule + 0x58, exe.guestXexHeader);
 
     // ---- function table for indirect calls ----
+    // Every slot starts out pointing at a trap, so a call to an address that
+    // isn't a known function start reports where it went instead of crashing.
+    for (uint64_t a = PPC_CODE_BASE; a < PPC_CODE_BASE + PPC_CODE_SIZE; a += 4)
+        PPC_LOOKUP_FUNC(mem::base, a) = UnmappedCall;
     size_t mapped = 0;
     for (auto* m = PPCFuncMappings; m->host; ++m, ++mapped)
         PPC_LOOKUP_FUNC(mem::base, m->guest) = m->host;
