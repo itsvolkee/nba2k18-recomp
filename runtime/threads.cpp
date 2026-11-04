@@ -146,6 +146,39 @@ namespace kernel
         ThreadMain(t);
     }
 
+    std::shared_ptr<GuestThread> CreateServiceContext(uint32_t cpu)
+    {
+        auto t = std::make_shared<GuestThread>();
+        t->id = s_nextThreadId++;
+        SetupGuestState(*t, 0x40000);
+        mem::W8(t->pcr + PCR_CURRENT_CPU, uint8_t(cpu));
+        {
+            std::lock_guard lock(s_threadLock);
+            s_threads[t->id] = t;
+        }
+        RegisterGuestObject(t->kthread, t);
+        return t;
+    }
+
+    void CallOnContext(GuestThread& t, uint32_t function, std::initializer_list<uint32_t> args)
+    {
+        // make CurrentThread() report this context while the guest code runs
+        auto previous = t_current;
+        {
+            std::lock_guard lock(s_threadLock);
+            auto it = s_threads.find(t.id);
+            if (it != s_threads.end()) t_current = it->second;
+        }
+        PPCContext& ctx = *t.ctx;
+        PPCRegister* regs[] = { &ctx.r3, &ctx.r4, &ctx.r5, &ctx.r6, &ctx.r7, &ctx.r8, &ctx.r9, &ctx.r10 };
+        size_t i = 0;
+        for (uint32_t a : args) if (i < 8) regs[i++]->u64 = a;
+        uint64_t sp = ctx.r1.u64;
+        CallGuest(ctx, function);
+        ctx.r1.u64 = sp;               // keep the stack balanced across repeated calls
+        t_current = previous;
+    }
+
     [[noreturn]] void ExitCurrentThread(uint32_t code)
     {
         throw ThreadExit{ code };

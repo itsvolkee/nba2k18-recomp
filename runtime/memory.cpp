@@ -20,7 +20,8 @@ namespace mem
     };
 
     static Region s_virtual  { "virtual",  0x40000000, 0x7F000000, 0x40000000 };
-    static Region s_system   { "system",   0x7F000000, 0x80000000, 0x7F000000 };
+    // stops short of 0x7FC80000, where the game writes GPU registers
+    static Region s_system   { "system",   0x7F000000, 0x7FC00000, 0x7F000000 };
     static Region s_physical { "physical", 0xA0000000, 0xC0000000, 0xA0000000 };
 
     static std::mutex s_lock;

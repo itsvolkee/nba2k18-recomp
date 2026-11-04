@@ -122,6 +122,12 @@ namespace kernel
                                               uint32_t xapiStartup, bool suspended);
     void ResumeThread(GuestThread* t);
     [[noreturn]] void ExitCurrentThread(uint32_t code);
+
+    // A guest context (stack, PCR, TLS) for host-driven work such as GPU
+    // interrupts and DPCs. CallOnContext must always be used from the same
+    // host thread for a given context.
+    std::shared_ptr<GuestThread> CreateServiceContext(uint32_t cpu);
+    void CallOnContext(GuestThread& t, uint32_t function, std::initializer_list<uint32_t> args);
     std::shared_ptr<GuestThread> CurrentThreadShared();
 
     // Reads a guest string (ANSI or UTF-16BE) into a host std::string

@@ -12,7 +12,8 @@ namespace mem
 
     // Guest address ranges (mirroring the Xbox 360 layout loosely):
     //   0x40000000-0x7EFFFFFF  virtual allocations (NtAllocateVirtualMemory, heaps)
-    //   0x7F000000-0x7FFFFFFF  thread stacks, PCRs, TLS
+    //   0x7F000000-0x7FBFFFFF  thread stacks, PCRs, TLS
+    //   0x7FC80000-0x7FFFFFFF  GPU registers (the game's MMIO writes land here)
     //   0x82000000-...         executable image, then the function table
     //   0xA0000000-0xBFFFFFFF  physical allocations (MmAllocatePhysicalMemoryEx)
     uint32_t AllocVirtual(uint32_t size, uint32_t align = 0x10000);
