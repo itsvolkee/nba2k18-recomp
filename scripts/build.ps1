@@ -40,7 +40,10 @@ foreach ($f in $xex, (Join-Path $Tools "XenonRecomp.exe"), (Join-Path $Tools "pp
     if (-not (Test-Path $f)) { throw "Missing $f. Run scripts\setup.ps1 first." }
 }
 if (-not (Test-Path (Join-Path $Tools "XexDump.exe")) -or -not (Test-Path (Join-Path $Tools "simde\x86\sse.h"))) {
-    throw "Your tools are older than this script (no XexDump/simde). Run: scripts\setup.ps1 -Repo $Repo -UpdateTools"
+    Step "Tools are older than this script (no XexDump/simde): updating them"
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "setup.ps1") -Repo $Repo -UpdateTools
+    if ($LASTEXITCODE -ne 0) { throw "Updating the tools failed; see notes\setup.log" }
+    if (-not (Test-Path (Join-Path $Tools "XexDump.exe"))) { throw "XexDump.exe still missing after updating the tools." }
 }
 $freeGB = [math]::Round((Get-PSDrive ($Root.Substring(0,1))).Free / 1GB, 1)
 if ($freeGB -lt 8) { throw "Only $freeGB GB free on $($Root.Substring(0,2)) - the build needs about 8 GB." }
