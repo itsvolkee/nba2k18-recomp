@@ -112,10 +112,12 @@ if (-not (Test-Path $img)) {
 $config = Join-Path $Root "config\NBA2K18.toml"
 $stamp  = Join-Path $PpcDir "ppc_recomp_shared.h"
 $done   = Join-Path $PpcDir ".complete"       # written only after a verified, complete generation
+# Fingerprint of everything the generated code depends on. Hashes, not file
+# dates: the tools unpacked from the GitHub zip carry timestamps hours ahead.
+$inputs = @($config, (Join-Path $Root "config\NBA2K18_switch_tables.toml"), (Join-Path $Tools "XenonRecomp.exe"), $xex)
+$fingerprint = ($inputs | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash }) -join ","
 $stale  = $Regenerate -or -not (Test-Path $stamp) -or -not (Test-Path $done) -or
-          ((Get-Item $config).LastWriteTime -gt (Get-Item $stamp).LastWriteTime) -or
-          ((Get-Item (Join-Path $Root "config\NBA2K18_switch_tables.toml")).LastWriteTime -gt (Get-Item $stamp).LastWriteTime) -or
-          ((Get-Item (Join-Path $Tools "XenonRecomp.exe")).LastWriteTime -gt (Get-Item $stamp).LastWriteTime)
+          ((Get-Content -LiteralPath $done -TotalCount 1) -ne $fingerprint)
 if ($stale) {
     Step "Generating the game's C++ (about a minute)"
     if (Test-Path $PpcDir) { Remove-Item -Recurse -Force $PpcDir }
@@ -136,7 +138,7 @@ if ($stale) {
     $switchErr = ([regex]::Matches($out, "jump outside function")).Count
     Write-Host "  $files files, $unrec unrecognized instructions, $switchErr switch errors"
     if ($files -lt 200) { throw "Only $files generated files; expected about 330. See notes\recompile.log" }
-    "$files files, $unrec unrecognized, $switchErr switch errors, $(Get-Date -Format s)" | Set-Content -LiteralPath $done
+    @($fingerprint, "$files files, $unrec unrecognized, $switchErr switch errors, $(Get-Date -Format s)") | Set-Content -LiteralPath $done
 }
 
 # ---------- 4. Compile ----------
