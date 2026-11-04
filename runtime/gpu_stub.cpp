@@ -2,12 +2,14 @@
 // get past graphics setup. Nothing is drawn yet.
 //
 //  - a 60 Hz "vsync" that calls the game's graphics interrupt callback
-//  - the command ring buffer is reported as consumed as soon as the game
-//    advances its write pointer (the read-pointer writeback follows it)
+//  - commands the game submits run through a minimal PM4 command processor
+//    (gpu_cp.cpp): memory/event writes, interrupts, indirect buffers, waits;
+//    drawing is skipped. The read-pointer writeback follows.
 //  - video-mode queries return 1280x720, widescreen, 60 Hz
 //  - VdSwap (one call per finished frame) is counted and logged
 //  - DPCs queued with KeInsertQueueDpc run on a dedicated guest context
 #include "kernel.h"
+#include "gpu.h"
 #include <chrono>
 #include <deque>
 
@@ -15,10 +17,8 @@ using namespace kernel;
 
 namespace
 {
-    // physical (GPU) address -> guest virtual address in the physical mapping
-    uint32_t PhysToVirt(uint32_t phys) { return (phys & 0x1FFFFFFF) | 0xA0000000; }
-
-    constexpr uint32_t GPU_REGS          = 0x7FC80000;
+    using gpu::PhysToVirt;
+    using gpu::GPU_REGS;
     constexpr uint32_t REG_CP_RB_WPTR    = 0x01C5;      // ring buffer write pointer (dwords)
 
     std::mutex g_lock;
@@ -49,24 +49,36 @@ namespace
     void GpuThread()
     {
         auto ctx = CreateServiceContext(2);    // interrupts are delivered on CPU 2
-        LOG_INFO("graphics stand-in running (60 Hz vsync, ring buffer auto-consumed)");
+        LOG_INFO("graphics stand-in running (60 Hz vsync, minimal command processor)");
         auto next = std::chrono::steady_clock::now();
         auto lastReport = next;
         uint64_t lastSwaps = 0;
+        uint32_t rptr = 0;
         while (true)
         {
             next += std::chrono::microseconds(16667);
             std::this_thread::sleep_until(next);
 
-            uint32_t cb, data, wb;
+            uint32_t cb, data, wb, ring, ringLog2;
             {
                 std::lock_guard lock(g_lock);
                 cb = g_interruptCallback; data = g_interruptData; wb = g_rptrWriteback;
+                ring = g_ringBase; ringLog2 = g_ringSizeLog2;
             }
 
-            // "consume" everything the game has written to the ring buffer
+            // run what the game has submitted, then report how far we got
             uint32_t wptr = mem::R32(GPU_REGS + REG_CP_RB_WPTR * 4);
-            if (wb) mem::W32(PhysToVirt(wb), wptr);
+            if (ring)
+            {
+                uint32_t ringDwords = (1u << (ringLog2 + 3)) / 4;
+                rptr = gpu::ExecuteRing(PhysToVirt(ring), ringDwords, rptr, wptr % ringDwords,
+                    [&](uint32_t cpuMask)
+                    {
+                        // command-processor interrupt: callback(source 1, user data)
+                        if (cb) CallOnContext(*ctx, cb, { 1, data });
+                    });
+                if (wb) mem::W32(PhysToVirt(wb), rptr);
+            }
 
             // vsync interrupt: callback(source 0 = vblank, user data)
             if (cb)
@@ -79,8 +91,8 @@ namespace
             if (now - lastReport >= std::chrono::seconds(5))
             {
                 uint64_t swaps = g_swaps.load();
-                LOG_INFO("graphics: {} vsyncs, {} frames finished ({:.1f}/s), ring write pointer {}",
-                         g_vsyncs.load(), swaps, double(swaps - lastSwaps) / 5.0, wptr);
+                LOG_INFO("graphics: {} vsyncs, {} frames finished ({:.1f}/s), ring read/write {}/{}; commands: {}",
+                         g_vsyncs.load(), swaps, double(swaps - lastSwaps) / 5.0, rptr, wptr, gpu::PacketSummary());
                 lastSwaps = swaps;
                 lastReport = now;
             }
