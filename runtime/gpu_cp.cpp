@@ -24,6 +24,16 @@ namespace gpu
     namespace
     {
         uint32_t g_regs[0x10000];
+        std::atomic<uint32_t> g_vblank{ 0 };
+
+        // log the first few occurrences of something, then go quiet
+        bool LogFew(const char* key, int limit = 8)
+        {
+            static std::mutex m;
+            static std::map<std::string, int> counts;
+            std::lock_guard lock(m);
+            return ++counts[key] <= limit;
+        }
         std::mutex g_statLock;
         std::map<std::string, uint64_t> g_counts;
         std::set<std::string> g_seen;
@@ -144,8 +154,11 @@ namespace gpu
 
         void ExecuteStream(Stream& s, uint32_t end, const std::function<void(uint32_t)>& interrupt, int depth);
 
-        void ExecutePacket(Stream& s, const std::function<void(uint32_t)>& interrupt, int depth)
+        // Returns false when a wait isn't satisfied yet: the stream stops at that
+        // packet and is retried on the next tick (like a real command processor stalling).
+        bool ExecutePacket(Stream& s, const std::function<void(uint32_t)>& interrupt, int depth)
         {
+            uint32_t packetStart = s.index;
             uint32_t h = s.Read();
             switch (h >> 30)
             {
@@ -156,17 +169,17 @@ namespace gpu
                 bool oneReg = h & 0x8000;
                 Count("type0 register write", reg);
                 for (uint32_t i = 0; i < count; i++) WriteReg(oneReg ? reg : reg + i, s.Read());
-                return;
+                return true;
             }
             case 1:
             {
                 Count("type1 register write", h & 0x7FF);
                 WriteReg(h & 0x7FF, s.Read());
                 WriteReg((h >> 11) & 0x7FF, s.Read());
-                return;
+                return true;
             }
             case 2:
-                return;
+                return true;
             }
 
             uint32_t op = (h >> 8) & 0x7F;
@@ -182,14 +195,25 @@ namespace gpu
             case 0x3D:  // MEM_WRITE: address, then data dwords
             {
                 uint32_t addr = arg(0);
+                if (LogFew("memwrite")) LOG_INFO("GPU MEM_WRITE to 0x{:08X}: {} dwords, first 0x{:X}", addr, count - 1, count > 1 ? arg(1) : 0);
                 for (uint32_t i = 1; i < count; i++) GpuStore(addr + (i - 1) * 4, arg(i));
                 break;
             }
             case 0x58:  // EVENT_WRITE_SHD: initiator, address, value
             case 0x59:  // EVENT_WRITE_EXT
-                if (count >= 3) GpuStore(arg(1), arg(2));
+                if (count >= 3)
+                {
+                    // initiator bit 31 asks for the GPU's vblank counter instead of the value
+                    bool counter = arg(0) >> 31;
+                    uint32_t value = counter ? g_vblank.load() : arg(2);
+                    GpuStore(arg(1), value);
+                    if (LogFew("eventwrite"))
+                        LOG_INFO("GPU EVENT_WRITE_SHD to 0x{:08X} = 0x{:X}{} (initiator 0x{:08X})",
+                                 arg(1), value, counter ? " (vblank counter)" : "", arg(0));
+                }
                 break;
             case 0x54:  // INTERRUPT: cpu mask
+                if (LogFew("interrupt")) LOG_INFO("GPU INTERRUPT (cpu mask 0x{:X})", count >= 1 ? arg(0) : 1);
                 interrupt(count >= 1 ? arg(0) : 1);
                 break;
             case 0x3F:  // INDIRECT_BUFFER: address, length (dwords)
@@ -206,12 +230,25 @@ namespace gpu
                 uint32_t info = arg(0), where = arg(1), ref = arg(2), mask = arg(3);
                 bool memory = info & 0x10;
                 auto read = [&] { return (memory ? GpuLoad(where) : g_regs[where & 0xFFFF]) & mask; };
-                auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-                while (!Compare(info, read(), ref) && std::chrono::steady_clock::now() < deadline)
-                    std::this_thread::sleep_for(std::chrono::microseconds(200));
                 if (!Compare(info, read(), ref))
-                    LOG_WARN("GPU WAIT_REG_MEM gave up after 2 s ({} 0x{:08X} & 0x{:X}, func {}, ref 0x{:X}, value 0x{:X})",
-                             memory ? "memory" : "register", where, mask, info & 7, ref, read());
+                {
+                    if (depth == 0)
+                    {
+                        // stall: retry this packet on the next tick
+                        if (LogFew("waitstall", 4))
+                            LOG_INFO("GPU stalled on WAIT_REG_MEM ({} 0x{:08X} & 0x{:X} func {} ref 0x{:X}, now 0x{:X})",
+                                     memory ? "memory" : "register", where, mask, info & 7, ref, read());
+                        s.index = packetStart;
+                        return false;
+                    }
+                    // inside an indirect buffer we can't resume mid-buffer: wait briefly
+                    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+                    while (!Compare(info, read(), ref) && std::chrono::steady_clock::now() < deadline)
+                        std::this_thread::sleep_for(std::chrono::microseconds(200));
+                    if (!Compare(info, read(), ref) && LogFew("waitgiveup"))
+                        LOG_WARN("GPU WAIT_REG_MEM in indirect buffer gave up ({} 0x{:08X} & 0x{:X} func {} ref 0x{:X}, value 0x{:X})",
+                                 memory ? "memory" : "register", where, mask, info & 7, ref, read());
+                }
                 break;
             }
             case 0x45:  // COND_WRITE: info, poll address, ref, mask, write address, data
@@ -245,13 +282,14 @@ namespace gpu
                 break;      // decoded and skipped
             }
             s.index = payloadStart + count;
+            return true;
         }
 
         void ExecuteStream(Stream& s, uint32_t end, const std::function<void(uint32_t)>& interrupt, int depth)
         {
             uint32_t guard = 0;
             while (s.index != end && guard++ < 0x100000)
-                ExecutePacket(s, interrupt, depth);
+                if (!ExecutePacket(s, interrupt, depth)) break;
         }
     }
 
@@ -266,6 +304,7 @@ namespace gpu
     }
 
     uint32_t ReadReg(uint32_t index) { return g_regs[index & 0xFFFF]; }
+    void SetVblankCount(uint32_t n) { g_vblank = n; }
 
     std::string PacketSummary()
     {

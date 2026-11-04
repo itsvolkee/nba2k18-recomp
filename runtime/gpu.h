@@ -17,6 +17,9 @@ namespace gpu
     uint32_t ExecuteRing(uint32_t ringVirt, uint32_t ringDwords, uint32_t rptr, uint32_t wptr,
                          const std::function<void(uint32_t)>& interrupt);
 
+    // Vblank counter, written by EVENT_WRITE_SHD packets that ask for it
+    void SetVblankCount(uint32_t n);
+
     // Register file the command processor maintains (type-0 writes, SET_CONSTANT, ...)
     uint32_t ReadReg(uint32_t index);
 

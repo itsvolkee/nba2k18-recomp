@@ -81,6 +81,7 @@ namespace
             }
 
             // vsync interrupt: callback(source 0 = vblank, user data)
+            gpu::SetVblankCount(uint32_t(g_vsyncs.load() + 1));
             if (cb)
             {
                 g_vsyncs++;
@@ -199,8 +200,13 @@ IMPORT(VdGetSystemCommandBuffer)
 IMPORT(VdSwap)
 {
     // One call per finished frame. Real presentation comes with the renderer.
+    // (u32* Buffer, u32* Fetch, ?, ?, u32* Frontbuffer, u32* Format, u32* ColorSpace, u32 Width, ...)
     uint64_t n = ++g_swaps;
     if (n == 1) LOG_INFO("first frame finished (VdSwap)");
+    if (n <= 3)
+        LOG_INFO("VdSwap #{}: buffer 0x{:08X} [0x{:08X} 0x{:08X} 0x{:08X} 0x{:08X}], fetch 0x{:08X}, a2 0x{:X}, a3 0x{:X}, frontbuffer 0x{:08X}, width {}",
+                 n, A0, A0 ? mem::R32(A0) : 0, A0 ? mem::R32(A0 + 4) : 0, A0 ? mem::R32(A0 + 8) : 0, A0 ? mem::R32(A0 + 12) : 0,
+                 A1, A2, A3, A4, A7);
     RETURN(0);
 }
 
