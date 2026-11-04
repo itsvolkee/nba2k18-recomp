@@ -71,6 +71,10 @@ Runtime (`runtime/`):
 - [x] Windows build (`scripts/build.ps1`): NBA2K18.exe builds on the PC with llvm-mingw
 - [x] Gets through startup on Windows: 10 threads, opens all data archives (0A-0H),
       queries controllers and video mode, starts GPU initialisation
-- [ ] Stalls after GPU init: the game waits for the GPU (ring-buffer read pointer,
-      vsync interrupt) and nothing emulates it yet
+- [x] Graphics stand-in (`runtime/gpu_stub.cpp`): 60 Hz vsync interrupts, ring buffer
+      read-pointer writeback, video-mode queries, DPCs. The game stays alive and
+      receives vsyncs
+- [ ] Stalls after its first 31 dwords of GPU commands, 0 frames: it most likely
+      waits for a fence or command-processor interrupt in those commands. Next: a
+      minimal PM4 command processor (memory/event writes, interrupts, indirect buffers)
 - [ ] Graphics (Xenos → D3D12/Vulkan), audio, input, XAM/profiles, networking
