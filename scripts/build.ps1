@@ -142,6 +142,17 @@ if ($stale) {
 }
 
 # ---------- 4. Compile ----------
+# Files unpacked from the GitHub tools zip carry timestamps hours in the future.
+# Ninja then sees the simde headers as newer than every object and recompiles
+# all the game code on each build, so bring any future timestamps back to now.
+$now = Get-Date
+$future = Get-ChildItem -LiteralPath $Tools, $PpcDir -Recurse -File -ErrorAction SilentlyContinue |
+          Where-Object { $_.LastWriteTime -gt $now }
+if ($future) {
+    $future | ForEach-Object { $_.LastWriteTime = $now }
+    Write-Host "  reset $(@($future).Count) future file timestamps"
+}
+
 Step "Compiling NBA2K18.exe with $Jobs jobs (the first build can take an hour or more)"
 $env:PATH = (Join-Path $Tools "llvm-mingw\bin") + ";" + (Join-Path $Tools "ninja") + ";" + $env:PATH
 & $cmake -S (Join-Path $Root "runtime") -B $BuildDir -G Ninja `
