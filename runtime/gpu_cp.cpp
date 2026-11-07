@@ -24,7 +24,8 @@ namespace gpu
     namespace
     {
         uint32_t g_regs[0x10000];
-        std::atomic<uint32_t> g_vblank{ 0 };
+        std::atomic<uint32_t> g_counter{ 0 };
+        std::atomic<uint64_t> g_swaps{ 0 };
 
         // log the first few occurrences of something, then go quiet
         bool LogFew(const char* key, int limit = 8)
@@ -64,13 +65,15 @@ namespace gpu
             case 0x55: return "SET_CONSTANT2";
             case 0x56: return "SET_SHADER_CONSTANTS";
             case 0x58: return "EVENT_WRITE_SHD";
-            case 0x59: return "EVENT_WRITE_EXT";
+            case 0x59: return "EVENT_WRITE_CFL";
+            case 0x5A: return "EVENT_WRITE_EXT";
             case 0x5B: return "EVENT_WRITE_ZPD";
             case 0x5E: return "CONTEXT_UPDATE";
             case 0x60: return "SET_BIN_MASK_LO";
             case 0x61: return "SET_BIN_MASK_HI";
             case 0x62: return "SET_BIN_SELECT_LO";
             case 0x63: return "SET_BIN_SELECT_HI";
+            case 0x64: return "SWAP (from VdSwap)";
             default:   return nullptr;
             }
         }
@@ -200,16 +203,32 @@ namespace gpu
                 break;
             }
             case 0x58:  // EVENT_WRITE_SHD: initiator, address, value
-            case 0x59:  // EVENT_WRITE_EXT
                 if (count >= 3)
                 {
-                    // initiator bit 31 asks for the GPU's vblank counter instead of the value
+                    // initiator bit 31 asks for the GPU counter instead of the value
                     bool counter = arg(0) >> 31;
-                    uint32_t value = counter ? g_vblank.load() : arg(2);
+                    uint32_t value = counter ? g_counter.load() : arg(2);
                     GpuStore(arg(1), value);
                     if (LogFew("eventwrite"))
                         LOG_INFO("GPU EVENT_WRITE_SHD to 0x{:08X} = 0x{:X}{} (initiator 0x{:08X})",
-                                 arg(1), value, counter ? " (vblank counter)" : "", arg(0));
+                                 arg(1), value, counter ? " (GPU counter)" : "", arg(0));
+                }
+                break;
+            case 0x5A:  // EVENT_WRITE_EXT: initiator, address -> screen extents of the last draw
+            {
+                // nothing is drawn, so report the whole surface: min/max x, min/max y, min/max z
+                uint32_t a = PhysToVirt(arg(1) & ~3u);
+                const uint16_t extents[] = { 0, 8192 >> 3, 0, 8192 >> 3, 0, 1 };
+                for (int i = 0; i < 6; i++) mem::W16(a + i * 2, extents[i]);
+                break;
+            }
+            case 0x64:  // SWAP (written by our VdSwap): signature, frontbuffer, width, height
+                if (count >= 1 && arg(0) == SWAP_SIGNATURE)
+                {
+                    g_counter++;
+                    uint64_t n = ++g_swaps;
+                    if (n <= 3 || (n & (n - 1)) == 0)
+                        LOG_INFO("GPU swap #{} (frontbuffer 0x{:08X})", n, count >= 2 ? arg(1) : 0);
                 }
                 break;
             case 0x54:  // INTERRUPT: cpu mask
@@ -227,27 +246,30 @@ namespace gpu
                 break;
             case 0x3C:  // WAIT_REG_MEM: info, address/register, reference, mask, wait
             {
-                uint32_t info = arg(0), where = arg(1), ref = arg(2), mask = arg(3);
+                uint32_t info = arg(0), where = arg(1), ref = arg(2), mask = arg(3), wait = arg(4);
                 bool memory = info & 0x10;
                 auto read = [&] { return (memory ? GpuLoad(where) : g_regs[where & 0xFFFF]) & mask; };
                 if (!Compare(info, read(), ref))
                 {
                     if (depth == 0)
                     {
-                        // stall: retry this packet on the next tick
+                        // stall: retry this packet on the next pass
                         if (LogFew("waitstall", 4))
                             LOG_INFO("GPU stalled on WAIT_REG_MEM ({} 0x{:08X} & 0x{:X} func {} ref 0x{:X}, now 0x{:X})",
                                      memory ? "memory" : "register", where, mask, info & 7, ref, read());
                         s.index = packetStart;
                         return false;
                     }
-                    // inside an indirect buffer we can't resume mid-buffer: wait briefly
-                    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+                    // Inside an indirect buffer we can't resume mid-buffer, so block
+                    // here. Vsync and interrupts run on another thread meanwhile, so
+                    // whatever the game is waiting for can still happen.
+                    auto limit = std::chrono::seconds(wait >= 0x100 ? 10 : 1);
+                    auto deadline = std::chrono::steady_clock::now() + limit;
                     while (!Compare(info, read(), ref) && std::chrono::steady_clock::now() < deadline)
-                        std::this_thread::sleep_for(std::chrono::microseconds(200));
+                        std::this_thread::sleep_for(std::chrono::microseconds(250));
                     if (!Compare(info, read(), ref) && LogFew("waitgiveup"))
-                        LOG_WARN("GPU WAIT_REG_MEM in indirect buffer gave up ({} 0x{:08X} & 0x{:X} func {} ref 0x{:X}, value 0x{:X})",
-                                 memory ? "memory" : "register", where, mask, info & 7, ref, read());
+                        LOG_WARN("GPU WAIT_REG_MEM in indirect buffer gave up after {} s ({} 0x{:08X} & 0x{:X} func {} ref 0x{:X}, value 0x{:X})",
+                                 limit.count(), memory ? "memory" : "register", where, mask, info & 7, ref, read());
                 }
                 break;
             }
@@ -304,7 +326,18 @@ namespace gpu
     }
 
     uint32_t ReadReg(uint32_t index) { return g_regs[index & 0xFFFF]; }
-    void SetVblankCount(uint32_t n) { g_vblank = n; }
+    void IncrementCounter() { g_counter++; }
+    uint64_t SwapsExecuted() { return g_swaps.load(); }
+
+    void SeedRegisters()
+    {
+        // values a real console reports; the game reads these and nothing writes them
+        WriteReg(0x0F00, 0x08100748);   // RB_EDRAM_TIMING
+        WriteReg(0x0F01, 0x0000200E);   // RB_BC_CONTROL
+        WriteReg(0x0F2D, 0x00BBBBBB);   // RB_HSIO_INTERFACE_ALIGNER_VALUE
+        WriteReg(0x1951, 0x00000001);   // interrupt status: vblank
+        WriteReg(0x1961, 0x050002D0);   // AVIVO_D1MODE_VIEWPORT_SIZE: 1280x720
+    }
 
     std::string PacketSummary()
     {

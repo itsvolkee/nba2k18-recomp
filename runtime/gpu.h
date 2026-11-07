@@ -17,8 +17,21 @@ namespace gpu
     uint32_t ExecuteRing(uint32_t ringVirt, uint32_t ringDwords, uint32_t rptr, uint32_t wptr,
                          const std::function<void(uint32_t)>& interrupt);
 
-    // Vblank counter, written by EVENT_WRITE_SHD packets that ask for it
-    void SetVblankCount(uint32_t n);
+    // GPU counter: advanced on every vblank and every swap; EVENT_WRITE_SHD
+    // packets that ask for it write its value.
+    void IncrementCounter();
+
+    // Frames presented (swap packets executed by the command processor)
+    uint64_t SwapsExecuted();
+
+    // Set the GPU registers the game reads but nothing writes (interrupt
+    // status, EDRAM timing, viewport size, ...)
+    void SeedRegisters();
+
+    // Private swap packet VdSwap writes into the command stream (opcode 0x64 is
+    // unused by the hardware), followed by "SWAP" and the frontbuffer address.
+    constexpr uint32_t PM4_SWAP = 0x64;
+    constexpr uint32_t SWAP_SIGNATURE = 0x53574150;   // "SWAP"
 
     // Register file the command processor maintains (type-0 writes, SET_CONSTANT, ...)
     uint32_t ReadReg(uint32_t index);
