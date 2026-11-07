@@ -4,9 +4,16 @@
 //   The game folder holds the extracted disc (default.xex and the data files)
 //   and default.img, the decrypted executable image written by XexDump.
 #include "kernel.h"
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <typeinfo>
 #include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -27,6 +34,49 @@ static void UnmappedCall(PPCContext& ctx, uint8_t*)
     std::abort();
 }
 
+// ---- crash reporting: say which guest thread died and where, before the process goes away ----
+static std::string GuestWhere()
+{
+    GuestThread* t = kernel::CurrentThread();
+    if (!t || !t->ctx) return "on a host thread";
+    return std::format("on guest thread {} (last guest call returned to 0x{:08X}, r3=0x{:X})",
+                       t->id, uint32_t(t->ctx->lr), t->ctx->r3.u32);
+}
+
+static void OnTerminate()
+{
+    std::string what = "unknown exception";
+    if (auto e = std::current_exception())
+    {
+        try { std::rethrow_exception(e); }
+        catch (const std::exception& ex) { what = std::format("{}: {}", typeid(ex).name(), ex.what()); }
+        catch (...) {}
+    }
+    else what = "std::terminate called without an exception";
+    LOG_ERROR("crash: {} {}", what, GuestWhere());
+    std::abort();
+}
+
+#ifdef _WIN32
+static LONG WINAPI OnUnhandledException(EXCEPTION_POINTERS* info)
+{
+    auto* r = info->ExceptionRecord;
+    std::string extra;
+    if (r->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && r->NumberParameters >= 2)
+    {
+        uintptr_t addr = r->ExceptionInformation[1];
+        uintptr_t base = reinterpret_cast<uintptr_t>(mem::base);
+        extra = std::format(" ({} host 0x{:X}", r->ExceptionInformation[0] ? "writing" : "reading", addr);
+        if (addr >= base && addr - base < 0x100000000ull)
+            extra += std::format(" = guest 0x{:08X}", uint32_t(addr - base));
+        extra += ")";
+    }
+    LOG_ERROR("crash: exception 0x{:08X} at host 0x{:X}{} {}", uint32_t(r->ExceptionCode),
+              reinterpret_cast<uintptr_t>(r->ExceptionAddress), extra, GuestWhere());
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
 static fs::path FindGameFolder(int argc, char** argv)
 {
     if (argc > 1) return argv[1];
@@ -38,6 +88,10 @@ static fs::path FindGameFolder(int argc, char** argv)
 int main(int argc, char** argv)
 {
     logging::OpenFile("nba2k18.log");
+    std::set_terminate(OnTerminate);
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(OnUnhandledException);
+#endif
     fs::path game = FindGameFolder(argc, argv);
     kernel::SetGameDirectory(fs::absolute(game).string());
     LOG_INFO("game folder: {}", kernel::GameDirectory());
