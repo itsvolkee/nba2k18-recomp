@@ -157,10 +157,17 @@ for off in range(0, TEXT_SIZE - 4, 4):
             for rT, rX in ((src[2], src[3]), (src[3], src[2])):
                 tbase = find_addr_of(rT, a2 - 4, lim)
                 if tbase is None: continue
-                count = find_bound(rX, a2 - 4, max(f[0], bctr - 4 * 48))
-                if not count or count > 4096: continue
                 rd = byte if src[0] == 'lbzx' else half
                 step = 1 if src[0] == 'lbzx' else 2
+                count = find_bound(rX, a2 - 4, max(f[0], bctr - 4 * 48))
+                if not count and step == 2:
+                    # halfword table indexed by a pre-scaled index:
+                    #   cmplwi rI,N ; bgt ; ... rlwinm rX,rI,1,0,30 ; lhzx rS,rT,rX
+                    a3, pre = find_def(rX, a2 - 4, lim, ('rlwinm',))
+                    if pre and pre[3] == 1 and pre[4] == 0 and pre[5] == 30:
+                        count = find_bound(pre[2], a3 - 4, max(f[0], bctr - 4 * 48))
+                        if count: rX = pre[2]
+                if not count or count > 4096: continue
                 labels = [(code_base + (rd(tbase + step * i) << shift)) & 0xFFFFFFFF for i in range(count)]
                 index_reg, kind, table_base = rX, ('computed' if shift else 'offset'), tbase
                 break
