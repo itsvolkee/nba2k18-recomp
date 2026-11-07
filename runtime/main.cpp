@@ -111,6 +111,7 @@ int main(int argc, char** argv)
 
     kernel::TscFrequency();
     LOG_INFO("starting the game");
+    kernel::StartWatchdog();
     kernel::RunMainThread(exe.entry, exe.defaultStackSize);
     LOG_INFO("main thread returned");
     return 0;

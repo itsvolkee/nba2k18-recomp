@@ -135,9 +135,42 @@ namespace kernel
     }
 
     // ---------------- waits ----------------
+    static const char* TypeName(ObjType t)
+    {
+        switch (t)
+        {
+        case ObjType::Event: return "event";
+        case ObjType::Semaphore: return "semaphore";
+        case ObjType::Mutant: return "mutant";
+        case ObjType::Thread: return "thread";
+        case ObjType::Timer: return "timer";
+        case ObjType::File: return "file";
+        default: return "object";
+        }
+    }
+
     uint32_t Wait(std::shared_ptr<KObject>* objs, uint32_t count, bool waitAll, const int64_t* timeout100ns)
     {
         GuestThread* self = CurrentThread();
+
+        // record what we're waiting on for the watchdog (cleared on return)
+        struct WaitRecord
+        {
+            GuestThread* t;
+            ~WaitRecord() { if (t) t->waitSince = 0; }
+        } record{ self };
+        if (self)
+        {
+            std::string what = std::format("{} {}", waitAll ? "all of" : "any of", count);
+            for (uint32_t i = 0; i < count && i < 3; i++)
+                what += std::format(" {}@{:08X}", TypeName(objs[i]->type), objs[i]->guestPtr);
+            if (timeout100ns) what += std::format(" timeout {}ms", -*timeout100ns / 10000);
+            snprintf(self->waitWhat, sizeof(self->waitWhat), "%s", what.c_str());
+            self->waitCaller = self->ctx ? uint32_t(self->ctx->lr) : 0;
+            self->waitSince = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        }
+
         std::unique_lock lock(s_waitLock);
 
         auto ready = [&]() -> int

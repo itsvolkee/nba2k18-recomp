@@ -96,6 +96,11 @@ struct GuestThread : KObject
     uint32_t exitCode = 0;
     uint32_t tlsSlots[64] = {};
 
+    // diagnostics for the watchdog: what this thread is waiting on, if anything
+    std::atomic<int64_t> waitSince{ 0 };    // steady-clock ms; 0 = not waiting
+    uint32_t waitCaller = 0;                // guest return address of the wait call
+    char waitWhat[96] = {};
+
     GuestThread() : KObject(ObjType::Thread) {}
     bool IsSignaled() const override { return finished; }
 };
@@ -135,6 +140,7 @@ namespace kernel
     std::string GuestWString(uint32_t p, uint32_t maxChars = 0xFFFF);
     std::string AnsiStringStruct(uint32_t ansiStringPtr);     // ANSI_STRING { u16 len, u16 max, u32 buf }
     void RunMainThread(uint32_t entry, uint32_t stackSize);
+    void StartWatchdog();       // logs what each guest thread is waiting on, every 15 s
 
     // Calls a guest function from host code.
     void CallGuest(PPCContext& ctx, uint32_t address);

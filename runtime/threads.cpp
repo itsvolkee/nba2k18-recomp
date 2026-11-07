@@ -1,6 +1,7 @@
 // Guest threads: each one gets a host thread, a PPCContext, a stack, a PCR and TLS in guest memory.
 #include "kernel.h"
 #include <map>
+#include <chrono>
 
 namespace kernel
 {
@@ -129,6 +130,33 @@ namespace kernel
             if (t->suspendCount > 0) --t->suspendCount;
         }
         WaitCv().notify_all();
+    }
+
+    void StartWatchdog()
+    {
+        std::thread([]
+        {
+            while (true)
+            {
+                std::this_thread::sleep_for(std::chrono::seconds(15));
+                int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                std::string report;
+                std::lock_guard lock(s_threadLock);
+                for (auto& [id, t] : s_threads)
+                {
+                    if (t->finished) continue;
+                    int64_t since = t->waitSince.load();
+                    const char* kind = t->startAddress ? "" : " (service)";
+                    if (since)
+                        report += std::format("\n    thread {}{}: waiting {:.1f}s on {} (called from 0x{:08X})",
+                                              id, kind, (now - since) / 1000.0, t->waitWhat, t->waitCaller);
+                    else
+                        report += std::format("\n    thread {}{}: running", id, kind);
+                }
+                LOG_INFO("watchdog:{}", report);
+            }
+        }).detach();
     }
 
     void RunMainThread(uint32_t entry, uint32_t stackSize)
