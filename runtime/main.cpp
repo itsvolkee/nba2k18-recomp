@@ -66,13 +66,22 @@ static LONG WINAPI OnUnhandledException(EXCEPTION_POINTERS* info)
     {
         uintptr_t addr = r->ExceptionInformation[1];
         uintptr_t base = reinterpret_cast<uintptr_t>(mem::base);
-        extra = std::format(" ({} host 0x{:X}", r->ExceptionInformation[0] ? "writing" : "reading", addr);
-        if (addr >= base && addr - base < 0x100000000ull)
-            extra += std::format(" = guest 0x{:08X}", uint32_t(addr - base));
-        extra += ")";
+        int64_t rel = int64_t(addr - base);
+        extra = std::format(" ({} host 0x{:X} = guest memory {}0x{:X})", r->ExceptionInformation[0] ? "writing" : "reading",
+                            addr, rel < 0 ? "-" : "+", rel < 0 ? uint64_t(-rel) : uint64_t(rel));
     }
-    LOG_ERROR("crash: exception 0x{:08X} at host 0x{:X}{} {}", uint32_t(r->ExceptionCode),
-              reinterpret_cast<uintptr_t>(r->ExceptionAddress), extra, GuestWhere());
+    uintptr_t module = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    uintptr_t pc = reinterpret_cast<uintptr_t>(r->ExceptionAddress);
+    LOG_ERROR("crash: exception 0x{:08X} at host 0x{:X} (exe+0x{:X}){} {}", uint32_t(r->ExceptionCode),
+              pc, pc - module, extra, GuestWhere());
+    if (GuestThread* t = kernel::CurrentThread(); t && t->ctx)
+    {
+        auto& c = *t->ctx;
+        LOG_ERROR("  r1=0x{:08X} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} r9=0x{:08X} r10=0x{:08X} r11=0x{:08X} r12=0x{:08X}",
+                  c.r1.u32, c.r3.u32, c.r4.u32, c.r5.u32, c.r9.u32, c.r10.u32, c.r11.u32, c.r12.u32);
+        LOG_ERROR("  r25=0x{:08X} r26=0x{:08X} r27=0x{:08X} r28=0x{:08X} r29=0x{:08X} r30=0x{:08X} r31=0x{:08X} ctr=0x{:08X}",
+                  c.r25.u32, c.r26.u32, c.r27.u32, c.r28.u32, c.r29.u32, c.r30.u32, c.r31.u32, c.ctr.u32);
+    }
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
