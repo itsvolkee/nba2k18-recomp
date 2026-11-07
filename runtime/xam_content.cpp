@@ -238,8 +238,49 @@ IMPORT(XamUserReadProfileSettings)
 {
     // (u32 TitleId, u32 User, u32 XuidCount, u64* Xuids, u32 SettingCount, u32* Ids,
     //  u32* BufferSize, void* Buffer, XOVERLAPPED* Ov)
+    //
+    // Games call this twice: once with no buffer to learn the size (answer 122,
+    // "insufficient buffer", plus the size), then again to read. With no saved
+    // profile every setting comes back as "default" with an empty value.
+    uint32_t user = A1, xuidCount = A2, xuids = A3, count = A4, ids = A5, sizePtr = A6, buffer = A7;
     uint32_t ov = mem::R32(ctx.r1.u32 + 0x54);          // 9th argument: on the caller's stack
-    RETURN(Finish(ov, X_ERROR_NO_SUCH_USER));
+    if (count < 1 || count > 32 || !sizePtr) RETURN(X_ERROR_INVALID_PARAMETER);
+    uint32_t bufferSize = mem::R32(sizePtr);
+    if (bufferSize && !buffer) RETURN(X_ERROR_INVALID_PARAMETER);
+
+    constexpr uint32_t HEADER = 8, SETTING = 40;
+    uint32_t settingsSize = 0, dataSize = 0;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint32_t key = mem::R32(ids + i * 4);
+        uint32_t type = key >> 28;
+        settingsSize += SETTING;
+        if (type == 4 || type == 6) dataSize += (key >> 16) & 0xFFF;     // wide string / binary
+    }
+    if (xuids) { settingsSize *= xuidCount; dataSize *= xuidCount; }
+    uint32_t needed = HEADER + settingsSize + dataSize;
+    if (!buffer || bufferSize < needed)
+    {
+        if (!bufferSize) mem::W32(sizePtr, needed);
+        RETURN(122);                                     // ERROR_INSUFFICIENT_BUFFER
+    }
+
+    memset(mem::Ptr(buffer), 0, needed);
+    uint32_t settings = buffer + HEADER;
+    mem::W32(buffer + 0, count);
+    mem::W32(buffer + 4, settings);
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint32_t key = mem::R32(ids + i * 4);
+        uint32_t s = settings + i * SETTING;
+        mem::W32(s + 0x00, 1);                           // source: default value
+        mem::W32(s + 0x08, user);                        // user index (xuid -1 for local reads)
+        mem::W32(s + 0x0C, 0xFFFFFFFF);
+        mem::W32(s + 0x10, key);
+        mem::W8(s + 0x18, uint8_t(key >> 28));           // data type; value left zero
+    }
+    LOG_TRACE("XamUserReadProfileSettings(title 0x{:08X}, user {}, {} settings) -> defaults", A0, user, count);
+    RETURN(Finish(ov, X_ERROR_SUCCESS));
 }
 
 IMPORT(XamUserWriteProfileSettings)
